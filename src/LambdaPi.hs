@@ -80,7 +80,7 @@ instance Show Neutral where
   show (NApp n v) = "(" ++ show n ++ ") (" ++ show v ++ ")"
   show (NNatElim v1 v2 v3 n) = "NNatElim (" ++ show v1 ++ ") (" ++ show v2 ++ ") (" ++ show v3 ++ ") (" ++ show n ++ ")"
 
-class Sustable a where
+class Substable a where
   fv :: a -> Set.Set Id
   subst :: Id -> Value -> a -> Result Value
 
@@ -103,10 +103,7 @@ vapp (VNeutral n) v2 = return $ VNeutral (NApp n v2)
 vapp _ _ = throwError "illegal application"
 
 vappM :: Result Value -> Result Value -> Result Value
-vappM v1m v2m = do
-  v1 <- v1m
-  v2 <- v2m
-  v1 `vapp` v2
+vappM v1m v2m = join $ vapp <$> v1m <*> v2m
 
 evalNat :: Value -> Value -> Value -> Value -> Result Value
 evalNat vm vmz vms VZero = return vmz
@@ -114,7 +111,10 @@ evalNat vm vmz vms (VSucc l) = vms `vapp` l `vappM` evalNat vm vmz vms l
 evalNat vm vmz vms (VNeutral n) = return $ VNeutral $ NNatElim vm vmz vms n
 evalNat _ _ _ _ = throwError "illegal application"
 
-instance Sustable Value where
+evalNatM :: Result Value -> Result Value -> Result Value -> Result Value -> Result Value
+evalNatM v1 v2 v3 v4 = join $ evalNat <$> v1 <*> v2 <*> v3 <*> v4
+
+instance Substable Value where
   fv (VLam x v) = Set.delete x (fv v)
   fv VStar = Set.empty
   fv (VPi x v' v) = fv v' `Set.union` Set.delete x (fv v)
@@ -128,30 +128,22 @@ instance Sustable Value where
       then return $ VLam y t
       else let y' = genName v y in VLam y' <$> (rename y y' t >>= subst x v)
   subst x v VStar = return VStar
-  subst x v (VPi y ty' ty) = do
+  subst x v (VPi y ty' ty) =
     let y' = genName ty y
-    VPi y' <$> subst x v ty' <*> (rename y y' ty >>= subst x v)
+     in VPi y' <$> subst x v ty' <*> (rename y y' ty >>= subst x v)
   subst x v (VNeutral n) = subst x v n
   subst x v VNat = return VNat
   subst x v VZero = return VZero
   subst x v (VSucc v') = VSucc <$> subst x v v'
 
-instance Sustable Neutral where
+instance Substable Neutral where
   fv (NFree x) = Set.singleton x
   fv (NApp n v) = fv n `Set.union` fv v
   fv (NNatElim v1 v2 v3 n) = fv v1 `Set.union` fv v2 `Set.union` fv v3 `Set.union` fv n
 
   subst x v (NFree y) = return $ if x == y then v else VNeutral (NFree y)
-  subst x v (NApp n v') = do
-    v1 <- subst x v n
-    v2 <- subst x v v'
-    v1 `vapp` v2
-  subst x v (NNatElim v1 v2 v3 n) = do
-    v1' <- subst x v v1
-    v2' <- subst x v v2
-    v3' <- subst x v v3
-    n' <- subst x v n
-    evalNat v1' v2' v3' n'
+  subst x v (NApp n v') = subst x v n `vappM` subst x v v'
+  subst x v (NNatElim m mz ms k) = evalNatM (subst x v m) (subst x v mz) (subst x v ms) (subst x v k)
 
 class Evalable a where
   eval :: a -> Result Value
@@ -165,18 +157,11 @@ instance Evalable ITerm where
   eval Nat = return VNat
   eval Zero = return VZero
   eval (Succ t) = VSucc <$> eval t
-  eval (NatElim m mz ms k) = do
-    vm <- eval m
-    vmz <- eval mz
-    vms <- eval ms
-    vk <- eval k
-    evalNat vm vmz vms vk
+  eval (NatElim m mz ms k) = evalNatM (eval m) (eval mz) (eval ms) (eval k)
 
 instance Evalable CTerm where
   eval (Inf t) = eval t
-  eval (Lam x t) = do
-    t' <- eval t
-    return (VLam x t')
+  eval (Lam x t) = VLam x <$> eval t
 
 -- type check & inference
 type Type = Value
