@@ -1,5 +1,5 @@
-import qualified Data.Map as M
 import Control.Monad.State
+import qualified Data.Map as M
 import LambdaPi
 import Test.Hspec
 
@@ -39,6 +39,19 @@ plus =
 
 main :: IO ()
 main = hspec $ do
+  describe "Value Eq" $ do
+    it "λx. x == λy. y" $ do
+      VLam "x" (vfree "x") == VLam "y" (vfree "y") `shouldBe` True
+
+    it "Ɐ(A : *). A == Ɐ(B : *). B" $ do
+      VPi "A" VStar (vfree "A") == VPi "B" VStar (vfree "B") `shouldBe` True
+
+    it "Ɐ(A : *). B =/= Ɐ(B : *). B" $ do
+      VPi "A" VStar (vfree "B") /= VPi "B" VStar (vfree "B") `shouldBe` True
+
+    it "Pi (A : *) (A : A). A == Pi (A : *) (B : A). B" $ do
+      VPi "A" VStar (VPi "A" (vfree "A") (vfree "A")) == VPi "A" VStar (VPi "B" (vfree "A") (vfree "B")) `shouldBe` True
+
   describe "LambdaPi.subst" $ do
     it "[x -> y] λx. x == λx. x" $ do
       subst "x" (vfree "y") (VLam "x" (vfree "x")) `shouldBe` Right (VLam "x" (vfree "x"))

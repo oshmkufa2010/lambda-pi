@@ -5,6 +5,7 @@ module LambdaPi where
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.State
 import Data.Either (fromRight)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map as M
 import qualified Data.Set as Set
 
@@ -45,15 +46,13 @@ data Value
   | VNeutral Neutral
 
 instance Eq Value where
-  VLam x v == VLam x' v' = either (const False) (== v') (rename x x' v)
+  VLam x v == VLam x' v' = fromRight False $ do
+    let z = genNameNotIn (fv v `Set.union` fv v') x
+    (==) <$> rename x z v <*> rename x' z v'
   VStar == VStar = True
-  VPi x ty1 ty2 == VPi x' ty1' ty2' = fromRight False result
-    where
-      result :: Result Bool
-      result = do
-        unless (ty1 == ty1') $ throwError ""
-        ty2'' <- rename x x' ty2
-        return (ty2'' == ty2')
+  VPi x ty1 ty2 == VPi x' ty1' ty2' = fromRight (ty1 == ty1') $ do
+    let z = genNameNotIn (fv ty2 `Set.union` fv ty2') x
+    (==) <$> rename x z ty2 <*> rename x' z ty2'
   VNeutral n == VNeutral n' = n == n'
   VNat == VNat = True
   VZero == VZero = True
@@ -84,12 +83,15 @@ class Substable a where
   fv :: a -> Set.Set Id
   subst :: Id -> Value -> a -> Result Value
 
-genName :: Value -> Id -> Id
-genName v x = case n of
+genNameNotIn :: Set.Set Id -> Id -> Id
+genNameNotIn fvs x = case n of
   0 -> x
   _ -> x ++ show n
   where
-    n = length $ takeWhile (`Set.member` fv v) $ x : map ((x ++) . show) [1 ..]
+    n = length $ takeWhile (`Set.member` fvs) $ x : map ((x ++) . show) [1 ..]
+
+genName :: Value -> Id -> Id
+genName v = genNameNotIn (fv v)
 
 vfree :: Id -> Value
 vfree x = VNeutral (NFree x)
