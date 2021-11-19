@@ -1,0 +1,45 @@
+entrypoints Module, Exp ;
+
+comment "--" ;
+comment "{-" "-}" ;
+
+layout "let" ;
+layout stop "in" ;
+-- Do not use layout toplevel as it makes pExp fail!
+
+Module.   Module ::= "module" AIdent "where" "{" [Decl] "}" ;
+
+DeclDef.             Decl ::= AIdent [Tele] ":" Exp "=" Exp ;
+separator            Decl ";" ;
+
+Let.          Exp  ::= "let" "{" [Decl] "}" "in" Exp ;
+Lam.          Exp  ::= "\\" AIdent [AIdent] "->" Exp ;
+Fun.          Exp1 ::= Exp2 "->" Exp1 ;
+Pi.           Exp1 ::= Tele [Tele] "->" Exp1 ;
+Sigma.        Exp1 ::= Tele [Tele] "*" Exp1 ;
+App.          Exp2 ::= Exp2 Exp3 ;
+Id.           Exp3 ::= "Id" Exp4 Exp4 Exp3 ;
+IdJ.          Exp3 ::= "idJ" Exp4 Exp4 Exp4 Exp4 Exp4 Exp4 ;
+Refl.         Exp3 ::= "Refl" Exp4 Exp4 ;
+Fst.          Exp4 ::= Exp4 ".1" ;
+Snd.          Exp4 ::= Exp4 ".2" ;
+Pair.         Exp5 ::= "(" Exp "," [Exp] ")" ;
+Var.          Exp5 ::= AIdent ;
+U.            Exp5 ::= "U" ;
+Hole.         Exp5 ::= HoleIdent ;
+coercions Exp 5 ;
+separator nonempty Exp "," ;
+
+-- Telescopes
+Tele.     Tele ::= "(" AIdent [AIdent] ":" Exp ")" ;
+terminator Tele "" ;
+
+-- Nonempty telescopes with Exp:s, this is hack to avoid ambiguities
+-- in the grammar when parsing Pi
+-- PTele.    PTele ::= "(" Exp ":" Exp ")" ;
+-- terminator nonempty PTele "" ;
+
+position token AIdent ('_')|(letter)(letter|digit|'\''|'_')*|('!')(digit)* ;
+separator AIdent "" ;
+
+position token HoleIdent '?' ;

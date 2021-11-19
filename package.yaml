@@ -24,6 +24,10 @@ dependencies:
 - mtl
 - containers
 - hspec
+- megaparsec
+- transformers
+- BNFC
+- array
 
 library:
   source-dirs: src
@@ -49,3 +53,15 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - lambda-pi
+
+default-extensions:
+- ConstraintKinds
+- DataKinds
+- FlexibleContexts
+- GADTs
+- KindSignatures
+- LambdaCase
+- Rank2Types
+- ScopedTypeVariables
+- TypeFamilies
+- ApplicativeDo

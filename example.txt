@@ -1,0 +1,30 @@
+module Example where {
+  id (A : U) (a : A) : A = a;
+  sigma (A : U) (B : U) (P : A -> U) (p : (a : A) * P a) : (a : A) * P a = (p.1 , p.2);
+
+  double (A : U) (f : A -> A) (a : A) : A = f (f a);
+  CBool : U = (A : U) -> A -> A -> A;
+  tru : CBool = \A t f -> t;
+  fls : CBool = \A t f -> f;
+  not : CBool -> CBool = \b -> \A t f -> b A f t;
+
+  CNat : U = (A : U) -> (A -> A) -> A -> A;
+  c0 : CNat = \A s z -> z;
+  csucc : CNat -> CNat = \n -> \A s z -> s (n A s z);
+  c1 : CNat = csucc c0;
+  c2 : CNat = csucc c1;
+  c3 : CNat = csucc c2;
+  cplus : CNat -> CNat -> CNat = \m n -> m CNat csucc n;
+  lemma3 : Id CNat c3 (cplus c1 c2) = Refl CNat c3;
+
+  isSingleton (X : U) : U = (c : X) * ((x : X) -> Id X c x);
+  fiber (X : U) (Y : U) (f : X -> Y) (y : Y) : U = (x : X) * Id Y (f x) y;
+  isEquiv (X : U) (Y : U) (f : X -> Y) : U = (y : Y) -> isSingleton (fiber X Y f y);
+  Equiv (X : U) (Y : U) : U = (f : X -> Y) * isEquiv X Y f;
+  singleType (X : U) : U = (Y : U) * Id U Y X;
+  lemma (X : U) : isSingleton (singleType X) = ((X, Refl U X), \pair -> idJ U (\y x p -> Id ((z : U) * Id U z x) (x, Refl U x) (y, p)) (\z' -> Refl ((z : U) * Id U z z') (z', Refl U z')) pair.1 X pair.2);
+
+  sigmaBetaEq (A : U) (B : A -> U) (p : (a : A) * B a) : Id ((a : A) * B a) (p.1, p.2) p = Refl ((a : A) * B a) p;
+
+  cong (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Id A x y) : Id B (f x) (f y) = idJ A (\x y xy -> Id B (f x) (f y)) (\z -> Refl B (f z)) x y p;
+}

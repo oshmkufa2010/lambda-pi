@@ -18,3 +18,25 @@ Todo:
 - [ ] Dependent vector
 - [ ] Sigma types
 - [ ] Custom inductive types (I don't know how hard to achieve this goal...)
+
+## Syntax
+
+```
+E = *
+  | A
+  | Lam x => E
+  | Pi (x : E) => E
+  | E E
+  | E : E
+  | Eq E E E
+  | Refl E E
+  | J E E E E E E
+  | Nat
+  | num
+  | NatElim E E E E
+```
+
+Example:
+```
+Lam A => Lam x => x : Pi (A : *) => Pi (x : A) => x
+```

@@ -1,41 +1,42 @@
-import Control.Monad.State
 import qualified Data.Map as M
+
 import LambdaPi
+-- import LambdaPi (CTerm (..))
 import Test.Hspec
 
-cVar :: Id -> CTerm
+cVar :: Id -> Term C
 cVar = Inf . Var
 
-cNat :: CTerm
+cNat :: Term C
 cNat = Inf Nat
 
-z :: CTerm
+z :: Term C
 z = Inf Zero
 
-s :: CTerm -> CTerm
+s :: Term C -> Term C
 s = Inf . Succ
 
-one :: CTerm
+one :: Term C
 one = s z
 
-two :: CTerm
+two :: Term C
 two = s one
 
-three :: CTerm
+three :: Term C
 three = s two
 
-plus :: ITerm
+plus :: Term I
 plus =
-  Lam
+  Ann (Lam
     "n"
     ( Inf $
         NatElim
           (Lam "n" (Inf $ Pi "x" cNat cNat))
           (Lam "n" (cVar "n"))
-          (Lam "l" (Lam "rec" (Lam "x" (Inf (Succ $ Inf (Var "rec" :@: cVar "x"))))))
+          (Lam "l" (Lam "rec" (Lam "x" (Inf (Succ $ Inf (App (Var "rec") (cVar "x")))))))
           (cVar "n")
-    )
-    ::: Inf (Pi "x" cNat (Inf $ Pi "y" cNat cNat))
+    ))
+    (Inf (Pi "x" cNat (Inf $ Pi "y" cNat cNat)))
 
 main :: IO ()
 main = hspec $ do
@@ -54,27 +55,36 @@ main = hspec $ do
 
   describe "LambdaPi.subst" $ do
     it "[x -> y] λx. x == λx. x" $ do
-      subst "x" (vfree "y") (VLam "x" (vfree "x")) `shouldBe` Right (VLam "x" (vfree "x"))
+      subst "x" (vfree "y") (VLam "x" (vfree "x")) `shouldBe` VLam "x" (vfree "x")
     it "[x -> y] λy. x == λy1. y" $ do
-      subst "x" (vfree "y") (VLam "y" (vfree "x")) `shouldBe` Right (VLam "y1" (vfree "y"))
+      subst "x" (vfree "y") (VLam "y" (vfree "x")) `shouldBe` VLam "y1" (vfree "y")
     it "[x -> y] λz. x == λz. y" $ do
-      subst "x" (vfree "y") (VLam "z" (vfree "x")) `shouldBe` Right (VLam "z" (vfree "y"))
+      subst "x" (vfree "y") (VLam "z" (vfree "x")) `shouldBe` VLam "z" (vfree "y")
 
   describe "LambdaPi.typeInfer" $ do
     it "supports term-dependents-on-term" $ do
-      let id' = Lam "x" (cVar "x") ::: Inf (Pi "_" (cVar "Bool") (cVar "Bool"))
-      evalStateT (typeInfer id') (M.singleton "Bool" VStar) `shouldBe` Right (VPi "_" (vfree "Bool") (vfree "Bool"))
+      let id' = Ann (Lam "x" (cVar "x")) (Inf (Pi "_" (cVar "Bool") (cVar "Bool")))
+      runTIWith (M.singleton "Bool" VStar) (typeInfer id') `shouldBe` Right (VPi "_" (vfree "Bool") (vfree "Bool"))
 
     it "supports term-dependents-on-type" $ do
       -- (λα x → x) :: ∀(α :: *).α -> α
-      let id' = Lam "A" (Lam "x" (cVar "x")) ::: Inf (Pi "A" (Inf Star) (Inf (Pi "a" (cVar "A") (cVar "A"))))
+      let id' = Ann (Lam "A" (Lam "x" (cVar "x"))) (Inf (Pi "A" (Inf Star) (Inf (Pi "a" (cVar "A") (cVar "A")))))
       runTI (typeInfer id') `shouldBe` Right (VPi "A" VStar (VPi "a" (vfree "A") (vfree "A")))
 
     it "supports type-dependents-on-type" $ do
       -- λa. a :: * -> *
-      let t = Lam "A" (cVar "A") ::: Inf (Pi "_" (Inf Star) (Inf Star))
+      let t = Ann (Lam "A" (cVar "A")) (Inf (Pi "_" (Inf Star) (Inf Star)))
       runTI (typeInfer t) `shouldBe` Right (VPi "_" VStar VStar)
 
+    it "supports type-dependents-on-term" $ do
+      let t = Ann (Lam "n" (Refl (Inf Nat) (cVar "n"))) (Inf (Pi "n" (Inf Nat) (Inf $ Eq (Inf Nat) (cVar "n") (cVar "n"))))
+      runTI (typeInfer t) `shouldBe` Right (VPi "n" VNat (VEq VNat (vfree "n") (vfree "n")))
+
   describe "LambdaPi.NatElimator" $ do
-    it "plus works correctly" $ do
-      eval (plus :@: one :@: two) `shouldBe` eval three
+    -- it "plus works correctly" $ do
+    --   eval (App (App plus one) two) `shouldBe` eval three
+
+    it "Eq (1 + 2) 3" $ do
+      let lemma = Ann (Refl (Inf Nat) three) (Inf (Eq (Inf Nat) (Inf (App (App plus one) two)) three))
+      let v3 = VSucc (VSucc (VSucc VZero))
+      runTI (typeInfer lemma) `shouldBe` Right (VEq VNat v3 v3)
