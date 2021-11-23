@@ -24,7 +24,6 @@ dependencies:
 - mtl
 - containers
 - hspec
-- megaparsec
 - transformers
 - BNFC
 - array
