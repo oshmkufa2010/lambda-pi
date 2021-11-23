@@ -1,24 +1,6 @@
-module LambdaPi
-  ( TermType (..),
-    Term (..),
-    NFType (..),
-    NormalForm (..),
-    Id,
-    Type,
-    TI,
-    typeInfer,
-    typeCheck,
-    typeInferTerms,
-    runTI,
-    runTIWith,
-    vfree,
-    subst,
-  )
-where
+module LambdaPi where
 
-import Control.Monad.Except ( unless, MonadError(throwError) )
-import Control.Monad.Reader
-    ( asks, MonadReader(local), ReaderT(runReaderT) )
+import Control.Monad.Except (MonadError (throwError), unless)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
@@ -47,7 +29,6 @@ data Term :: TermType -> * where
   Pair :: Term C -> Term C -> Term C
   Fst :: Term I -> Term I
   Snd :: Term I -> Term I
-  -- Module :: Id -> [(Id, Term I)] -> Term
 
 instance Show (Term a) where
   show (Ann t ty) = "(" ++ show t ++ ") : (" ++ show ty ++ ")"
@@ -214,51 +195,46 @@ evalSnd (VNeutral n) = VNeutral (NSnd n)
 evalSnd _ = undefined
 
 eval :: M.Map Id (NormalForm Value) -> Term a -> NormalForm Value
-eval env (Ann t _) = eval env t
-eval env Star = VStar
-eval env (Pi x ty t) = let env' = M.insert x (vfree x) env in VPi x (eval env ty) (eval env' t)
-eval env (Sigma x ty t) = let env' = M.insert x (vfree x) env in VSigma x (eval env ty) (eval env' t)
-eval env (Var x) = fromMaybe (error $ "undefined variable: " ++ x) (M.lookup x env)
-eval env (App t1 t2) = eval env t1 `vapp` eval env t2
-eval env Nat = VNat
-eval env Zero = VZero
-eval env (Succ t) = VSucc $ eval env t
-eval env (NatElim m mz ms k) = evalNat (eval env m) (eval env mz) (eval env ms) (eval env k)
-eval env (Eq ty x y) = VEq (eval env ty) (eval env x) (eval env y)
-eval env (EqElim ty m mrefl a b p) = eval env mrefl
-eval env (Let x v t) = subst x (eval env v) (eval env t)
-eval env (Inf t) = eval env t
-eval env (Lam x t) = VLam x $ eval (M.insert x (vfree x) env) t
-eval env (Refl ty x) = VRefl (eval env ty) (eval env x)
-eval env (Fst t) = evalFst $ eval env t
-eval env (Snd t) = evalSnd $ eval env t
-eval env (Pair t1 t2) = VPair (eval env t1) (eval env t2)
+eval ctx (Ann t _) = eval ctx t
+eval ctx Star = VStar
+eval ctx (Pi x ty t) = let ctx' = M.insert x (vfree x) ctx in VPi x (eval ctx ty) (eval ctx' t)
+eval ctx (Sigma x ty t) = let ctx' = M.insert x (vfree x) ctx in VSigma x (eval ctx ty) (eval ctx' t)
+eval ctx (Var x) = fromMaybe (error $ "undefined variable: " ++ x) (M.lookup x ctx)
+eval ctx (App t1 t2) = eval ctx t1 `vapp` eval ctx t2
+eval ctx Nat = VNat
+eval ctx Zero = VZero
+eval ctx (Succ t) = VSucc $ eval ctx t
+eval ctx (NatElim m mz ms k) = evalNat (eval ctx m) (eval ctx mz) (eval ctx ms) (eval ctx k)
+eval ctx (Eq ty x y) = VEq (eval ctx ty) (eval ctx x) (eval ctx y)
+eval ctx (EqElim ty m mrefl a b p) = eval ctx mrefl
+eval ctx (Let x v t) = subst x (eval ctx v) (eval ctx t)
+eval ctx (Inf t) = eval ctx t
+eval ctx (Lam x t) = VLam x $ eval (M.insert x (vfree x) ctx) t
+eval ctx (Refl ty x) = VRefl (eval ctx ty) (eval ctx x)
+eval ctx (Fst t) = evalFst $ eval ctx t
+eval ctx (Snd t) = evalSnd $ eval ctx t
+eval ctx (Pair t1 t2) = VPair (eval ctx t1) (eval ctx t2)
 
 -- type check & inference
 type Type = NormalForm Value
 
-data Env = Env {typeEnv :: M.Map Id Type, valEnv :: M.Map Id (NormalForm Value)}
+class Ctxable (m :: * -> *) where
+  askTyCtx :: m (M.Map Id (NormalForm Value))
+  extTyCtx :: Id -> Type -> m a -> m a
+  askValCtx :: m (M.Map Id (NormalForm Value))
+  extValCtx :: Id -> Type -> m a -> m a
 
-updateTypeEnv :: (M.Map Id Type -> M.Map Id Type) -> Env -> Env
-updateTypeEnv f Env {typeEnv = te, valEnv = ve} = Env {typeEnv = f te, valEnv = ve}
+type TcMonad m = (Monad m, Ctxable m, MonadError String m)
 
-updateValEnv :: (M.Map Id Type -> M.Map Id Type) -> Env -> Env
-updateValEnv f Env {typeEnv = te, valEnv = ve} = Env {typeEnv = te, valEnv = f ve}
-
-type TI = ReaderT Env (Either String)
-
-runTI :: TI a -> Either String a
-runTI tc = runReaderT tc $ Env {typeEnv = M.empty, valEnv = M.empty}
-
-runTIWith :: M.Map Id Type -> TI a -> Either String a
-runTIWith env tc = runReaderT tc $ Env {typeEnv = env, valEnv = M.empty}
-
-evalM :: (MonadReader Env m) => Term a -> m (NormalForm Value)
+evalM :: TcMonad m => Term a -> m (NormalForm Value)
 evalM t = do
-  env <- asks valEnv
-  return $ eval env t
+  ctx <- askValCtx
+  return $ eval ctx t
 
-typeInfer :: (MonadReader Env m, MonadError String m) => Term I -> m Type
+lookupTy :: TcMonad m => Id -> m (Maybe Type)
+lookupTy x = M.lookup x <$> askTyCtx
+
+typeInfer :: TcMonad m => Term I -> m Type
 typeInfer (Ann t ty) = do
   typeCheck ty VStar
   vty <- evalM ty
@@ -268,16 +244,16 @@ typeInfer Star = return VStar
 typeInfer (Pi x ty t) = do
   typeCheck ty VStar
   ty' <- evalM ty
-  local (updateValEnv (M.insert x (vfree x)) . updateTypeEnv (M.insert x ty')) (typeCheck t VStar)
+  extValCtx x (vfree x) $ extTyCtx x ty' $ typeCheck t VStar
   return VStar
 typeInfer (Sigma x ty t) = do
   typeCheck ty VStar
   ty' <- evalM ty
-  local (updateValEnv (M.insert x (vfree x)) . updateTypeEnv (M.insert x ty')) (typeCheck t VStar)
+  extValCtx x (vfree x) $ extTyCtx x ty' $ typeCheck t VStar
   return VStar
 typeInfer (Var x) = do
-  ctx <- asks typeEnv
-  case M.lookup x ctx of
+  result <- lookupTy x
+  case result of
     Nothing -> throwError $ "unbound variable: " ++ x
     Just ty -> return ty
 typeInfer t@(App t1 t2) = do
@@ -344,13 +320,13 @@ typeInfer (Snd t) = do
       return $ subst x (evalFst vt) t'
     _ -> throwError $ "type mismatch: Sigma type vs " ++ show ty
 
-typeCheck :: (MonadReader Env m, MonadError String m) => Term C -> Type -> m ()
+typeCheck :: TcMonad m => Term C -> Type -> m ()
 typeCheck (Inf t) ty = do
   ty' <- typeInfer t
   unless (ty == ty') $ throwError $ "type mismatch: " ++ show ty ++ " (exceped) vs " ++ show ty' ++ " (infered)"
 typeCheck (Lam x t) (VPi x' ty ty') = do
   let ty'' = rename x' x ty'
-  local (updateValEnv (M.insert x (vfree x)) . updateTypeEnv (M.insert x ty)) $ typeCheck t ty''
+  extValCtx x (vfree x) $ extTyCtx x ty $ typeCheck t ty''
 typeCheck (Refl ty a) (VEq vty' va' vb') = do
   typeCheck ty VStar
   vty <- evalM ty
@@ -363,7 +339,7 @@ typeCheck (Refl ty a) (VEq vty' va' vb') = do
 typeCheck (Let x v t) ty = do
   ty' <- typeInfer v
   tyv <- evalM v
-  local (updateValEnv (M.insert x tyv) . updateTypeEnv (M.insert x ty')) $ typeCheck t ty
+  extValCtx x tyv $ extTyCtx x ty' $ typeCheck t ty
 -- (t1, t2) : \Sigma (x : ty) t
 typeCheck (Pair t1 t2) (VSigma x ty t) = do
   typeCheck t1 ty
@@ -372,10 +348,10 @@ typeCheck (Pair t1 t2) (VSigma x ty t) = do
   typeCheck t2 vt
 typeCheck t ty = throwError $ "type mismatch: " ++ show t ++ " vs " ++ show ty
 
-typeInferTerms :: (MonadReader Env m, MonadError String m) => [(Id, Term I)] -> m [(Id, Type)]
+typeInferTerms :: TcMonad m => [(Id, Term I)] -> m [(Id, Type)]
 typeInferTerms [] = return []
 typeInferTerms ((x, term) : terms) = do
   ty <- typeInfer term
   vterm <- evalM term
-  ts <- local (updateValEnv (M.insert x vterm) . updateTypeEnv (M.insert x ty)) $ typeInferTerms terms
+  ts <- extValCtx x vterm $ extTyCtx x ty $ typeInferTerms terms
   return $ (x, ty) : ts
