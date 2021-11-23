@@ -1,9 +1,10 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 module LambdaPi where
 
 import Control.Monad.Except (MonadError (throwError), unless)
-import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
+import Prelude hiding (lookup)
 
 type Id = String
 
@@ -194,12 +195,12 @@ evalSnd (VPair _ v) = v
 evalSnd (VNeutral n) = VNeutral (NSnd n)
 evalSnd _ = undefined
 
-eval :: M.Map Id (NormalForm Value) -> Term a -> NormalForm Value
+eval :: Ctx ctx Id (NormalForm Value) => ctx Id (NormalForm Value) -> Term a -> NormalForm Value
 eval ctx (Ann t _) = eval ctx t
 eval ctx Star = VStar
-eval ctx (Pi x ty t) = let ctx' = M.insert x (vfree x) ctx in VPi x (eval ctx ty) (eval ctx' t)
-eval ctx (Sigma x ty t) = let ctx' = M.insert x (vfree x) ctx in VSigma x (eval ctx ty) (eval ctx' t)
-eval ctx (Var x) = fromMaybe (error $ "undefined variable: " ++ x) (M.lookup x ctx)
+eval ctx (Pi x ty t) = VPi x (eval ctx ty) (eval (insert x (vfree x) ctx) t)
+eval ctx (Sigma x ty t) = VSigma x (eval ctx ty) (eval (insert x (vfree x) ctx) t)
+eval ctx (Var x) = fromMaybe (error $ "undefined variable: " ++ x) (lookup x ctx)
 eval ctx (App t1 t2) = eval ctx t1 `vapp` eval ctx t2
 eval ctx Nat = VNat
 eval ctx Zero = VZero
@@ -209,7 +210,7 @@ eval ctx (Eq ty x y) = VEq (eval ctx ty) (eval ctx x) (eval ctx y)
 eval ctx (EqElim ty m mrefl a b p) = eval ctx mrefl
 eval ctx (Let x v t) = subst x (eval ctx v) (eval ctx t)
 eval ctx (Inf t) = eval ctx t
-eval ctx (Lam x t) = VLam x $ eval (M.insert x (vfree x) ctx) t
+eval ctx (Lam x t) = VLam x $ eval (insert x (vfree x) ctx) t
 eval ctx (Refl ty x) = VRefl (eval ctx ty) (eval ctx x)
 eval ctx (Fst t) = evalFst $ eval ctx t
 eval ctx (Snd t) = evalSnd $ eval ctx t
@@ -218,13 +219,21 @@ eval ctx (Pair t1 t2) = VPair (eval ctx t1) (eval ctx t2)
 -- type check & inference
 type Type = NormalForm Value
 
-class Ctxable (m :: * -> *) where
-  askTyCtx :: m (M.Map Id (NormalForm Value))
-  extTyCtx :: Id -> Type -> m a -> m a
-  askValCtx :: m (M.Map Id (NormalForm Value))
-  extValCtx :: Id -> Type -> m a -> m a
+class Ctx (ctx :: * -> * -> *) (k :: *) (v :: *) where
+  lookup :: k -> ctx k v -> Maybe v
+  insert :: k -> v -> ctx k v -> ctx k v
 
-type TcMonad m = (Monad m, Ctxable m, MonadError String m)
+class (Ctx (TyCtx m) Id Type) => TyCtxReader (m :: * -> *) where
+  type TyCtx m :: * -> * -> *
+  askTyCtx :: m (TyCtx m Id Type)
+  modifyTyCtx :: (TyCtx m Id Type -> TyCtx m Id Type) -> m a -> m a
+
+class (Ctx (ValCtx m) Id (NormalForm Value)) => ValCtxReader (m :: * -> *) where
+  type ValCtx m :: * -> * -> *
+  askValCtx :: m (ValCtx m Id (NormalForm Value))
+  modifyValCtx :: (ValCtx m Id (NormalForm Value) -> ValCtx m Id (NormalForm Value)) -> m a -> m a
+
+type TcMonad m = (Monad m, TyCtxReader m, ValCtxReader m, MonadError String m)
 
 evalM :: TcMonad m => Term a -> m (NormalForm Value)
 evalM t = do
@@ -232,7 +241,13 @@ evalM t = do
   return $ eval ctx t
 
 lookupTy :: TcMonad m => Id -> m (Maybe Type)
-lookupTy x = M.lookup x <$> askTyCtx
+lookupTy x = lookup x <$> askTyCtx
+
+extTyCtx :: TcMonad m => Id -> Type -> m a -> m a
+extTyCtx x ty = modifyTyCtx (insert x ty)
+
+extValCtx :: TcMonad m => Id -> NormalForm Value -> m a -> m a
+extValCtx x ty = modifyValCtx (insert x ty)
 
 typeInfer :: TcMonad m => Term I -> m Type
 typeInfer (Ann t ty) = do

@@ -9,7 +9,7 @@ import Control.Monad.Except (MonadError (..))
 import Control.Monad.Reader (MonadReader (local), ReaderT (runReaderT), asks)
 import qualified Data.Map as M
 import Exp.Par (myLexer, pExp, pModule)
-import LambdaPi (Id, NFType (..), NormalForm, Type, Ctxable (..), typeInferTerms)
+import LambdaPi (Id, NFType (..), NormalForm, Type, Ctx (..), TyCtxReader (..), ValCtxReader (..), typeInferTerms)
 import Resolver (resolveModule, runResolver)
 import System.Environment (getArgs)
 
@@ -24,11 +24,19 @@ updateValEnv f Env {typeEnv = te, valEnv = ve} = Env {typeEnv = te, valEnv = f v
 newtype App a = App {getApp :: ReaderT Env (Either String) a}
   deriving (Functor, Applicative, Monad, MonadError String, MonadReader Env)
 
-instance Ctxable App where
+instance Ctx M.Map Id Type where
+  lookup = M.lookup
+  insert = M.insert
+
+instance TyCtxReader App where
+  type TyCtx App = M.Map
   askTyCtx = asks typeEnv
-  extTyCtx x ty ma = local (updateTypeEnv (M.insert x ty)) ma
+  modifyTyCtx = local . updateTypeEnv
+
+instance ValCtxReader App where
+  type ValCtx App = M.Map
   askValCtx = asks valEnv
-  extValCtx x v ma = local (updateValEnv (M.insert x v)) ma
+  modifyValCtx = local . updateValEnv
 
 runApp :: App a -> Either String a
 runApp (App tc) = runReaderT tc $ Env {typeEnv = M.empty, valEnv = M.empty}
