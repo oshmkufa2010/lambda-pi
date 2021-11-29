@@ -15,12 +15,6 @@ import System.Environment (getArgs)
 
 data Env = Env {typeEnv :: M.Map Id Type, valEnv :: M.Map Id (NormalForm Value)}
 
-updateTypeEnv :: (M.Map Id Type -> M.Map Id Type) -> Env -> Env
-updateTypeEnv f Env {typeEnv = te, valEnv = ve} = Env {typeEnv = f te, valEnv = ve}
-
-updateValEnv :: (M.Map Id Type -> M.Map Id Type) -> Env -> Env
-updateValEnv f Env {typeEnv = te, valEnv = ve} = Env {typeEnv = te, valEnv = f ve}
-
 newtype App a = App {getApp :: ReaderT Env (Either String) a}
   deriving (Functor, Applicative, Monad, MonadError String, MonadReader Env)
 
@@ -31,12 +25,12 @@ instance Ctx M.Map Id Type where
 instance TyCtxReader App where
   type TyCtx App = M.Map
   askTyCtx = asks typeEnv
-  modifyTyCtx = local . updateTypeEnv
+  modifyTyCtx f = local (\env -> env{ typeEnv = f (typeEnv env) })
 
 instance ValCtxReader App where
   type ValCtx App = M.Map
   askValCtx = asks valEnv
-  modifyValCtx = local . updateValEnv
+  modifyValCtx f = local (\env -> env{ valEnv = f (valEnv env) })
 
 runApp :: App a -> Either String a
 runApp (App tc) = runReaderT tc $ Env {typeEnv = M.empty, valEnv = M.empty}
